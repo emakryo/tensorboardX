@@ -27,6 +27,7 @@ from .embedding import make_mat, make_sprite, make_tsv, append_pbtxt
 from .event_file_writer import EventFileWriter
 from .onnx_graph import gg
 from .pytorch_graph import graph
+from .chainer_graph import chainer_graph
 from .proto import event_pb2
 from .proto import summary_pb2
 from .proto import graph_pb2
@@ -508,6 +509,9 @@ class SummaryWriter(object):
 
     def add_onnx_graph(self, prototxt):
         self.file_writer.add_onnx_graph(gg(prototxt))
+
+    def add_chainer_graph(self, variable, input_to_model=None, verbose=False, **kwargs):
+        self.file_writer.add_graph(chainer_graph(variable))
 
     def add_graph(self, model, input_to_model=None, verbose=False, **kwargs):
         # prohibit second call?
