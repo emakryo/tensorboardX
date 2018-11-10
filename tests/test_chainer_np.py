@@ -41,7 +41,3 @@ if chainer_installed:
         def test_chainer_write(self):
             with SummaryWriter() as w:
                 w.add_scalar('scalar', chainer.Variable(np.random.rand(1)), 0)
-
-        def test_chainer_graph(self):
-            with SummaryWriter() as w:
-                w.add_chainer_graph(tensors[0])

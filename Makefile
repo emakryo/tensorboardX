@@ -1,5 +1,5 @@
 TARGET=
-.PHONY: all full_test test build
+.PHONY: all full_test test build clean
 
 all: full_test
 
@@ -13,4 +13,7 @@ build:
 	docker build -t tensorboardx:test .
 
 tensorboard:
-	docker run -v $(shell pwd):/src -p 6006:6006 --rm tensorflow/tensorflow:1.12.0-py3 tensorboard --logdir=/src/runs,/src/tests/runs
+	docker run -v $(shell pwd):/src -p 6006:6006 --rm tensorflow/tensorflow:1.12.0-py3 tensorboard --logdir=/src/runs
+
+clean:
+	rm -rf runs
