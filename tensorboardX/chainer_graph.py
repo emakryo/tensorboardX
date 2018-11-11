@@ -14,9 +14,27 @@ except ImportError as e:
     chainer_installed = False
 
 
-def chainer_graph(variables):
+def chainer_graph(model, input_to_model):
     if not chainer_installed:
         raise RuntimeError("Chainer is not installed")
+
+    if isinstance(model, chainer.Link):
+        if isinstance(input_to_model, chainer.Variable):
+            variable = model(input_to_model)
+        elif isinstance(input_to_model, list):
+            variable = model(*input_to_model)
+        elif isinstance(input_to_model, dict):
+            variable = model(**input_to_model)
+        else:
+            raise ValueError
+
+    else:
+        variable = model
+
+    if isinstance(variable, chainer.Variable):
+        variables = [variable]
+    else:
+        variables = list(variable)
 
     if not all([isinstance(variable, chainer.Variable) for variable in variables]):
         raise ValueError("variable must be chainer.Variable")

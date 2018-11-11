@@ -510,8 +510,14 @@ class SummaryWriter(object):
     def add_onnx_graph(self, prototxt):
         self.file_writer.add_onnx_graph(gg(prototxt))
 
-    def add_chainer_graph(self, variable, input_to_model=None, verbose=False, **kwargs):
-        self.file_writer.add_graph(chainer_graph(variable))
+    def add_chainer_graph(self, model, input_to_model=None):
+        """Add graph data to summary
+
+        Args:
+            model (chainer.Link, chainer.Chain, chainer.Variable or list of chainer.Variable): model or variable(s)
+            input_to_model (chainer.Variable, list, or dict): variable(s) to be fed into model
+        """
+        self.file_writer.add_graph(chainer_graph(model, input_to_model))
 
     def add_graph(self, model, input_to_model=None, verbose=False, **kwargs):
         # prohibit second call?

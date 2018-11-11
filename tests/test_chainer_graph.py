@@ -4,7 +4,6 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import unittest
-import pytest
 
 import numpy as np
 from tensorboardX import SummaryWriter
@@ -37,12 +36,24 @@ if chainer_installed:
 
 
 class ChainerGraphTest(unittest.TestCase):
+    def test_single_variable(self):
+        model = MLP()
+        x = chainer.Variable(np.random.randn(16, 64).astype('f'))
+        y = model(x)
 
-    @pytest.mark.skipif(not chainer_installed, reason="Chainer is not installed")
-    def test_MLP(self):
+        with SummaryWriter() as w:
+            w.add_chainer_graph(y)
+
+    def test_multiple_variables(self):
         model = MLP()
         x = chainer.Variable(np.random.randn(16, 64).astype('f'))
         y = model(x)
 
         with SummaryWriter() as w:
             w.add_chainer_graph([y])
+
+    def test_chain(self):
+        model = MLP()
+        x = chainer.Variable(np.random.randn(16, 64).astype('f'))
+        with SummaryWriter() as w:
+            w.add_chainer_graph(model, x)
