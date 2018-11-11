@@ -31,8 +31,8 @@ if chainer_installed:
 
         def forward(self, x):
             h = self.linear_0(x)
-            #h = F.relu(h)
-            #h = self.linear_1(h)
+            h = F.relu(h)
+            h = self.linear_1(h)
             return h
 
 

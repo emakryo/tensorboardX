@@ -1,3 +1,4 @@
+from collections import defaultdict
 from .proto.attr_value_pb2 import AttrValue
 from .proto.graph_pb2 import GraphDef
 from .proto.node_def_pb2 import NodeDef
@@ -20,7 +21,7 @@ def chainer_graph(variables):
     if not all([isinstance(variable, chainer.Variable) for variable in variables]):
         raise ValueError("variable must be chainer.Variable")
 
-    graph = build_computational_graph(variables)
+    nodes = build_computational_graph(variables).nodes
 
     # process graph
 
@@ -31,24 +32,28 @@ def chainer_graph(variables):
     #     NodeDef(name='output', op='Output', input=['hidden/hidden2']),
     # ]
 
-    id2idx = {id(node): i for i, node in enumerate(graph.nodes)}
+    label_count = defaultdict(int)
+    id2name = {}
+    for node in nodes:
+        id2name[id(node)] = f'{node.label}_{label_count[node.label]}'
+        label_count[node.label] += 1
 
     def convert(node):
         i = id(node)
-        name = f'node{id2idx[i]}'
         op = node.label
+        name = id2name[i]
         if isinstance(node, chainer.function_node.FunctionNode):
-            inputs = [f'node{id2idx[id(n)]}' for n in node.inputs]
+            inputs = [id2name[id(n)] for n in node.inputs]
         elif isinstance(node, chainer.variable.VariableNode):
             if node.creator_node is None:
                 inputs = []
             else:
-                inputs = [f'node{id2idx[id(node.creator_node)]}']
+                inputs = [id2name[id(node.creator_node)]]
         else:
-            raise Exception
+            raise ValueError
 
         return {'name': name, 'input': inputs, 'op': op}
 
-    nodes = [NodeDef(**convert(node)) for node in graph.nodes]
+    node_def = [NodeDef(**convert(node)) for node in nodes]
 
-    return GraphDef(node=nodes, versions=VersionDef(producer=22)), RunMetadata()
+    return GraphDef(node=node_def, versions=VersionDef(producer=22)), RunMetadata()
