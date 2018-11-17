@@ -36,22 +36,6 @@ if chainer_installed:
 
 
 class ChainerGraphTest(unittest.TestCase):
-    def test_single_variable(self):
-        model = MLP()
-        x = chainer.Variable(np.random.randn(16, 64).astype('f'))
-        y = model(x)
-
-        with SummaryWriter() as w:
-            w.add_chainer_graph(y)
-
-    def test_multiple_variables(self):
-        model = MLP()
-        x = chainer.Variable(np.random.randn(16, 64).astype('f'))
-        y = model(x)
-
-        with SummaryWriter() as w:
-            w.add_chainer_graph([y])
-
     def test_chain(self):
         model = MLP()
         x = chainer.Variable(np.random.randn(16, 64).astype('f'))
