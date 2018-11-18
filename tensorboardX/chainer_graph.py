@@ -35,33 +35,28 @@ except ImportError as e:
     chainer_installed = False
 
 
-def chainer_graph(model, input_to_model):
+def chainer_graph(model, *input_args, **input_kwargs):
     if not chainer_installed:
         raise RuntimeError("Chainer is not installed")
 
     assert isinstance(model, chainer.Link)
 
+    # change names of input variables
+    default_input_name = {}
+    for i, v in enumerate(input_args):
+        if not isinstance(v, chainer.Variable):
+            continue
+        default_input_name[i] = v.name
+        v.name = 'input[%d]' % i
+
+    for k, v in input_kwargs.items():
+        if not isinstance(v, chainer.Variable):
+            continue
+        default_input_name[k] = v.name
+        v.name = 'input[%s]' % k
+
     with FunctionNameHook(), SetScopeHook():
-        if isinstance(input_to_model, chainer.Variable):
-            default_input_name = input_to_model.name
-            input_to_model.name = 'input'
-            output = model(input_to_model)
-        elif (isinstance(input_to_model, list) or
-              isinstance(input_to_model, tuple)):
-            default_input_name = [x.name for x in input_to_model]
-            for i, x in enumerate(input_to_model):
-                x.name = 'input[%d]' % i
-
-            output = model(*input_to_model)
-        elif isinstance(input_to_model, dict):
-            default_input_name = {k: v.name for k, v in input_to_model.items()}
-            for k, v in input_to_model.items():
-                v.name = 'input[%s]' % k
-
-            output = model(**input_to_model)
-        else:
-            warnings.warn('Input variable is not recognizable')
-            output = model(input_to_model)
+        output = model(*input_args, **input_kwargs)
 
     # change parameter name
     for param_name, param in model.namedparams():
@@ -69,38 +64,43 @@ def chainer_graph(model, input_to_model):
         param.name = top_link_name + param_name
 
     if isinstance(output, chainer.Variable):
-        outputs = [output]
-    elif isinstance(output, list):
-        outputs = output
+        output_list = [output]
+    elif isinstance(output, list) or isinstance(output, list):
+        output_list = list(output)
     elif isinstance(output, dict):
-        outputs = list(output.values())
+        output_list = list(output.values())
     else:
         raise ValueError('Output of model must be Variable, dict, list, '
                          'or tuple of Variable')
 
     if not all([isinstance(variable, chainer.Variable)
-                for variable in outputs]):
+                for variable in output_list]):
         raise ValueError('Output of model must be Variable, dict, list, '
                          'or tuple of Variable')
 
-    nodes = build_computational_graph(outputs).nodes
+    nodes = build_computational_graph(output_list).nodes
 
     # set functions output name
     for node in nodes:
         if isinstance(node, chainer.function_node.FunctionNode):
-            for i, output in enumerate(node.outputs):
-                output().name = node.name + '_out[%d]' % i
+            for i, o in enumerate(node.outputs):
+                o().name = node.name + '_out[%d]' % i
 
-    for i, v in enumerate(outputs):
-        v.name = 'output[%d]' % i
+    if isinstance(output, chainer.Variable):
+        output.name = 'output'
+    elif isinstance(output, list) or isinstance(output, tuple):
+        for i, o in enumerate(output):
+            o.name = 'output[%d]' % i
+    elif isinstance(output, dict):
+        for k, o in enumerate(output):
+            o.name = 'output[%s]' % k
 
     def convert(node):
         if isinstance(node, chainer.function_node.FunctionNode):
-            op = node.label
-            inputs = [n.name for n in node.inputs]
-            return {'name': node.name, 'input': inputs, 'op': str(op)}
+            inputs = [str(n.name) for n in node.inputs]
+            return {'name': str(node.name), 'input': inputs,
+                    'op': str(node.label)}
         elif isinstance(node, chainer.variable.VariableNode):
-            op = node.label
             if node.creator_node is None:
                 inputs = []
             else:
@@ -109,24 +109,23 @@ def chainer_graph(model, input_to_model):
             shape = AttrValue(list=AttrValue.ListValue(
                 shape=[TensorShapeProto(
                     dim=[TensorShapeProto.Dim(size=d) for d in node.shape])]))
-            return {'name': node.name, 'input': inputs, 'op': str(op),
-                    'attr': {'_output_shapes': shape}}
+            return {'name': str(node.name), 'input': inputs,
+                    'op': str(node.label), 'attr': {'_output_shapes': shape}}
         else:
             raise ValueError
 
     node_def = [NodeDef(**convert(node)) for node in nodes]
 
     # clean up
-    if isinstance(model, chainer.Link):
-        if isinstance(input_to_model, chainer.Variable):
-            input_to_model.name = default_input_name
-        elif (isinstance(input_to_model, list) or
-              isinstance(input_to_model, tuple)):
-            for i, v in enumerate(input_to_model):
-                v.name = default_input_name[i]
-        elif isinstance(input_to_model, dict):
-            for k, v in input_to_model.items():
-                v.name = default_input_name[k]
+    for i, v in enumerate(input_args):
+        if not isinstance(v, chainer.Variable):
+            continue
+        v.name = default_input_name[i]
+
+    for k, v in input_kwargs.items():
+        if not isinstance(v, chainer.Variable):
+            continue
+        v.name = default_input_name[k]
 
     for param in model.params():
         param.name = param._old_name
