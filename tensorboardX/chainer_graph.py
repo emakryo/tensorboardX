@@ -1,4 +1,3 @@
-import warnings
 from .proto.attr_value_pb2 import AttrValue
 from .proto.graph_pb2 import GraphDef
 from .proto.node_def_pb2 import NodeDef
@@ -8,17 +7,17 @@ from .proto.versions_pb2 import VersionDef
 
 try:
     import chainer
+    from chainer.variable import VariableNode
+    from chainer.function_node import FunctionNode
     from chainer.computational_graph import build_computational_graph
     chainer_installed = True
     current_scope = []
-    top_link_name = 'top'
-
+    top_link_name = 'main'
 
     class FunctionNameHook(chainer.FunctionHook):
         def forward_preprocess(self, function, in_data):
             global current_scope
             function.name = '/'.join(current_scope + [function.label])
-
 
     class SetScopeHook(chainer.LinkHook):
         def __init__(self):
@@ -30,12 +29,76 @@ try:
         def forward_postprocess(self, args):
             self.scope.pop()
 
+    class Node:
+        def __init__(self, chainer_node):
+            self.node = chainer_node
+            if isinstance(chainer_node, VariableNode):
+                self.shape = chainer_node.shape
+            else:
+                self.shape = None
+            self.name = str(chainer_node.name)
+            self.op = str(chainer_node.label)
+            self.inputs = set()
+            self.outputs = set()
+
+        def to_tensorboard(self):
+            if self.shape:
+                shape = AttrValue(list=AttrValue.ListValue(
+                    shape=[TensorShapeProto(
+                        dim=[TensorShapeProto.Dim(size=d) for d in self.shape])]))
+                return NodeDef(
+                    name=self.name, op=self.op, attr={'_output_shapes': shape},
+                    input=[i.name for i in self.inputs],
+                )
+            else:
+                return NodeDef(
+                    name=self.name, op=self.op,
+                    input=[i.name for i in self.inputs],
+                )
+
+    class Graph:
+        def __init__(self, output_vars):
+            graph = build_computational_graph(output_vars)
+            id2nodes = {id(node): Node(node) for node in graph.nodes}
+            for i, o in graph.edges:
+                i, o = id2nodes[id(i)], id2nodes[id(o)]
+                o.inputs.add(i)
+                i.outputs.add(o)
+
+            self.nodes = list(id2nodes.values())
+            self.ouputs = list(id2nodes[id(o.node)] for o in output_vars)
+
+        @property
+        def variable_nodes(self):
+            return [node for node in self.nodes
+                    if isinstance(node.node, VariableNode)]
+
+        def remove_intermediate_vars(self):
+            for v_node in self.variable_nodes:
+                for f_in in v_node.inputs:
+                    # preserve shape
+                    f_in.shape = v_node.shape
+                    for f_out in v_node.outputs:
+                        f_in.outputs.add(f_out)
+                        f_in.outputs.discard(v_node)
+                        f_out.inputs.add(f_in)
+                        f_out.inputs.discard(v_node)
+
+                if len(v_node.inputs) > 0 and len(v_node.outputs) > 0:
+                    del self.nodes[self.nodes.index(v_node)]
+
+        def to_tensorboard(self):
+            return GraphDef(
+                node=[node.to_tensorboard() for node in self.nodes],
+                versions=VersionDef(producer=22)
+            )
 
 except ImportError as e:
     chainer_installed = False
 
 
-def chainer_graph(model, *input_args, **input_kwargs):
+def chainer_graph(model, *input_args, remove_intermediate_vars=True,
+                  **input_kwargs):
     if not chainer_installed:
         raise RuntimeError("Chainer is not installed")
 
@@ -65,10 +128,15 @@ def chainer_graph(model, *input_args, **input_kwargs):
 
     if isinstance(output, chainer.Variable):
         output_list = [output]
+        output.name = 'output'
     elif isinstance(output, list) or isinstance(output, list):
         output_list = list(output)
+        for i, o in enumerate(output):
+            o.name = 'output[%d]' % i
     elif isinstance(output, dict):
         output_list = list(output.values())
+        for k, o in enumerate(output):
+            o.name = 'output[%s]' % k
     else:
         raise ValueError('Output of model must be Variable, dict, list, '
                          'or tuple of Variable')
@@ -78,58 +146,20 @@ def chainer_graph(model, *input_args, **input_kwargs):
         raise ValueError('Output of model must be Variable, dict, list, '
                          'or tuple of Variable')
 
-    nodes = build_computational_graph(output_list).nodes
+    graph = Graph(output_list)
 
     # set functions output name
-    for node in nodes:
-        if isinstance(node, chainer.function_node.FunctionNode):
-            for i, o in enumerate(node.outputs):
-                o().name = node.name + '_out[%d]' % i
+    for node in graph.nodes:
+        if isinstance(node.node, VariableNode) \
+                and len(node.inputs) > 0 and len(node.outputs) > 0:
+            node.name = list(node.inputs)[0].name + '_out'
 
-    if isinstance(output, chainer.Variable):
-        output.name = 'output'
-    elif isinstance(output, list) or isinstance(output, tuple):
-        for i, o in enumerate(output):
-            o.name = 'output[%d]' % i
-    elif isinstance(output, dict):
-        for k, o in enumerate(output):
-            o.name = 'output[%s]' % k
-
-    def convert(node):
-        if isinstance(node, chainer.function_node.FunctionNode):
-            inputs = [str(n.name) for n in node.inputs]
-            return {'name': str(node.name), 'input': inputs,
-                    'op': str(node.label)}
-        elif isinstance(node, chainer.variable.VariableNode):
-            if node.creator_node is None:
-                inputs = []
-            else:
-                inputs = [node.creator_node.name]
-
-            shape = AttrValue(list=AttrValue.ListValue(
-                shape=[TensorShapeProto(
-                    dim=[TensorShapeProto.Dim(size=d) for d in node.shape])]))
-            return {'name': str(node.name), 'input': inputs,
-                    'op': str(node.label), 'attr': {'_output_shapes': shape}}
-        else:
-            raise ValueError
-
-    node_def = [NodeDef(**convert(node)) for node in nodes]
+    if remove_intermediate_vars:
+        graph.remove_intermediate_vars()
 
     # clean up
-    for i, v in enumerate(input_args):
-        if not isinstance(v, chainer.Variable):
-            continue
-        v.name = default_input_name[i]
-
-    for k, v in input_kwargs.items():
-        if not isinstance(v, chainer.Variable):
-            continue
-        v.name = default_input_name[k]
-
     for param in model.params():
         param.name = param._old_name
         del param._old_name
 
-    return (GraphDef(node=node_def, versions=VersionDef(producer=22)),
-            RunMetadata())
+    return graph.to_tensorboard(), RunMetadata()

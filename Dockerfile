@@ -1,9 +1,10 @@
 FROM travisci/ci-garnet:packer-1512502276-986baf0
 
 ARG PYTHON_VERSION=3.6
+ARG WITH_CHAINER=1
 
 # install
-RUN sudo apt-get update
+# RUN sudo apt-get update
 RUN wget -q https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
 RUN bash miniconda.sh -b -p /opt/miniconda
 ENV PATH="/opt/miniconda/bin:$PATH"
@@ -13,7 +14,7 @@ RUN conda update -q conda
 RUN conda create -q -n test-environment python=$PYTHON_VERSION
 ENV PATH="/opt/miniconda/envs/test-environment/bin:$PATH"
 RUN pip install future
-RUN pip install chainer -q
+RUN if [ $WITH_CHAINER -ne 0 ]; then pip install chainer -q; fi
 RUN pip install torchvision -q
 RUN pip uninstall torch -y
 RUN pip install torch_nightly -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
